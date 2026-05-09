@@ -52,10 +52,9 @@ $payload.printers = @(
 
 $payload | ConvertTo-Json -Compress
 `
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	out, err := cmd.CombinedOutput()
+	out, err := runPowerShell(script)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list printers: %w: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("failed to list printers: %w", err)
 	}
 
 	var payload struct {
@@ -88,10 +87,9 @@ func submitPDF(pdf *gofpdf.Fpdf, filename string) error {
 	}
 
 	script := buildWindowsPrintScript(filePath, getSelectedPrinter())
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	out, err := cmd.CombinedOutput()
+	out, err := runPowerShell(script)
 	if err != nil {
-		return fmt.Errorf("windows print failed for %s: %w: %s", filePath, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("windows print failed for %s: %w", filePath, err)
 	}
 
 	log.Printf("print job submitted: %s", strings.TrimSpace(string(out)))
@@ -112,4 +110,69 @@ func buildWindowsPrintScript(filePath, printer string) string {
 
 func powershellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func runPowerShell(script string) ([]byte, error) {
+	powershellPath, err := resolvePowerShell()
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(powershellPath, "-NoProfile", "-NonInteractive", "-Command", script)
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		return out, fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(out)))
+	}
+
+	return out, nil
+}
+
+func resolvePowerShell() (string, error) {
+	candidates := []string{
+		"powershell.exe",
+		"powershell",
+		"pwsh.exe",
+		"pwsh",
+	}
+
+	systemRoots := []string{
+		strings.TrimSpace(os.Getenv("SystemRoot")),
+		strings.TrimSpace(os.Getenv("WINDIR")),
+		`C:\Windows`,
+	}
+
+	for _, root := range systemRoots {
+		if root == "" {
+			continue
+		}
+		candidates = append(candidates,
+			filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+			filepath.Join(root, "Sysnative", "WindowsPowerShell", "v1.0", "powershell.exe"),
+			filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell"),
+			filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "pwsh.exe"),
+			filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "pwsh"),
+			filepath.Join(root, "System32", "pwsh.exe"),
+			filepath.Join(root, "System32", "pwsh"),
+		)
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+
+		if filepath.IsAbs(candidate) {
+			if fileInfo, statErr := os.Stat(candidate); statErr == nil && !fileInfo.IsDir() {
+				return candidate, nil
+			}
+			continue
+		}
+
+		resolved, lookErr := exec.LookPath(candidate)
+		if lookErr == nil {
+			return resolved, nil
+		}
+	}
+
+	return "", fmt.Errorf("powershell executable not found; checked PATH and standard Windows locations")
 }
