@@ -1,0 +1,9 @@
+module fyne-browser
+
+go 1.23.2
+
+require (
+	github.com/phpdave11/gofpdf v1.4.3
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6
+)
